@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 from typing import Tuple, Dict, List
 from collections import deque
-from behavioral_core import BehavioralSelfPredictor
+from .behavioral_core import BehavioralSelfPredictor
 
 class SimplePCA:
     

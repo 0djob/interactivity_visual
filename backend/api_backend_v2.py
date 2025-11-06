@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-from behavioral_core import BehavioralSelfPredictor
-from behavior_space_visualizer import BehaviorSpaceVisualizer
+from .behavioral_core import BehavioralSelfPredictor
+from .behavior_space_visualizer import BehaviorSpaceVisualizer
 
 app = FastAPI(title="Interactivity Maximization API")
 
