@@ -67,7 +67,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
   void connectWebSocket() {
     try {
       channel = WebSocketChannel.connect(
-        Uri.parse('ws://localhost:8000/ws/agent'),
+        Uri.parse('wss://interactivity-agent.onrender.com/ws/agent'),
       );
 
       channel.ready.then((_) {

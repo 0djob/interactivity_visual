@@ -60397,7 +60397,7 @@ A.wi.prototype={
 au(){this.b2()
 this.IB()},
 IB(){var s,r,q,p=this
-try{r=A.anI(A.eP("ws://localhost:8000/ws/agent"),null)
+try{r=A.anI(A.eP("wss://interactivity-agent.onrender.com/ws/agent"),null)
 p.d=r
 r=r.f
 r===$&&A.b()
