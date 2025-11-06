@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart' as url_launcher;
 
 void main() => runApp(const BehaviorSpaceApp());
 
@@ -41,7 +42,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
   bool _shouldReconnect = true;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int _maxReconnectDelay = 30; // Max 30 seconds between attempts
+  static const int _maxReconnectDelay = 30;
   String _connectionError = '';
 
   double iScore = 0.0;
@@ -72,9 +73,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
     connectWebSocket();
   }
 
-  /// Calculate exponential backoff delay for reconnection attempts
   int _getReconnectDelay() {
-    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max)
     final delay = math.min(
       math.pow(2, _reconnectAttempts).toInt(),
       _maxReconnectDelay,
@@ -83,38 +82,30 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
   }
 
   void connectWebSocket() {
-    // Prevent multiple simultaneous connection attempts
     if (_isConnecting || !_shouldReconnect) {
-      print('Connection attempt skipped (already connecting or should not reconnect)');
       return;
     }
     
     _isConnecting = true;
     _reconnectAttempts++;
-    
-    print('🔄 Attempting WebSocket connection (attempt #$_reconnectAttempts)...');
 
     try {
-      // Close any existing connection first
       _cleanupConnection();
 
       channel = WebSocketChannel.connect(
         Uri.parse('wss://interactivity-agent.onrender.com/ws/agent'),
       );
 
-      // Handle connection ready
       channel!.ready.then((_) {
         if (mounted && _shouldReconnect) {
           setState(() {
             isConnected = true;
             _isConnecting = false;
-            _reconnectAttempts = 0; // Reset on successful connection
+            _reconnectAttempts = 0;
             _connectionError = '';
           });
-          print('✅ Connected to behavior space agent');
         }
       }).catchError((error) {
-        print('❌ WebSocket ready error: $error');
         if (mounted) {
           setState(() {
             _connectionError = 'Connection failed: ${error.toString()}';
@@ -123,7 +114,6 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
         _handleConnectionFailure();
       });
 
-      // Listen to incoming messages
       channelSubscription = channel!.stream.listen(
         (message) {
           if (isPaused || !mounted) return;
@@ -181,22 +171,22 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
               step = data['meta']['step'] ?? 0;
             });
           } catch (e) {
-            print('⚠️ Error parsing message: $e');
+            print('Error parsing message: $e');
           }
         },
         onDone: () {
-          print('🔌 WebSocket connection closed');
           if (mounted) {
             setState(() {
+              isConnected = false;
               _connectionError = 'Connection closed by server';
             });
           }
           _handleConnectionFailure();
         },
         onError: (error) {
-          print('❌ WebSocket error: $error');
           if (mounted) {
             setState(() {
+              isConnected = false;
               _connectionError = 'WebSocket error: ${error.toString()}';
             });
           }
@@ -205,9 +195,9 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
         cancelOnError: true,
       );
     } catch (e) {
-      print('❌ Connection exception: $e');
       if (mounted) {
         setState(() {
+          isConnected = false;
           _connectionError = 'Connection exception: ${e.toString()}';
         });
       }
@@ -215,7 +205,6 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
     }
   }
 
-  /// Handle connection failure and schedule reconnection
   void _handleConnectionFailure() {
     if (!mounted || !_shouldReconnect) return;
 
@@ -224,9 +213,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
       _isConnecting = false;
     });
 
-    // Schedule reconnection with exponential backoff
     final delay = _getReconnectDelay();
-    print('⏱️  Scheduling reconnection in $delay seconds...');
     
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(Duration(seconds: delay), () {
@@ -236,7 +223,6 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
     });
   }
 
-  /// Clean up existing connection resources
   void _cleanupConnection() {
     channelSubscription?.cancel();
     channelSubscription = null;
@@ -244,7 +230,6 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
     try {
       channel?.sink.close(1000, 'Reconnecting');
     } catch (e) {
-      // Ignore close errors
     }
     channel = null;
   }
@@ -254,7 +239,6 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
   }
 
   void handleReset() {
-    print('🔄 Resetting connection...');
     _reconnectAttempts = 0;
     _shouldReconnect = true;
     
@@ -276,25 +260,22 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
   Future<void> handleWakeServer() async {
     if (mounted) {
       setState(() {
-        _connectionError = 'Waking up server... This may take 30-60 seconds on first request.';
+        _connectionError = 'Waking up server... This may take 30-60 seconds.';
       });
     }
 
     try {
-      print('🌅 Attempting to wake server...');
       final response = await http.get(
         Uri.parse('https://interactivity-agent.onrender.com/health'),
       ).timeout(const Duration(seconds: 90));
       
       if (response.statusCode == 200) {
-        print('✅ Server is awake!');
         if (mounted) {
           setState(() {
             _connectionError = 'Server is awake! Connecting...';
             _reconnectAttempts = 0;
           });
         }
-        // Give server a moment, then try to connect
         await Future.delayed(const Duration(seconds: 2));
         if (mounted && !isConnected) {
           connectWebSocket();
@@ -303,10 +284,9 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
         throw Exception('Server returned ${response.statusCode}');
       }
     } catch (e) {
-      print('❌ Failed to wake server: $e');
       if (mounted) {
         setState(() {
-          _connectionError = 'Failed to wake server: ${e.toString()}. Try again in a moment.';
+          _connectionError = 'Failed to wake server: ${e.toString()}';
         });
       }
     }
@@ -375,217 +355,531 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            const Text('Behavior Space Visualization'),
-            const SizedBox(width: 12),
-            // Connection status indicator
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: isConnected 
-                    ? Colors.green.withOpacity(0.2)
-                    : (_isConnecting 
-                        ? Colors.orange.withOpacity(0.2)
-                        : Colors.red.withOpacity(0.2)),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isConnected 
-                      ? Colors.green
-                      : (_isConnecting ? Colors.orange : Colors.red),
-                  width: 1,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isConnected 
-                          ? Colors.green
-                          : (_isConnecting ? Colors.orange : Colors.red),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    isConnected 
-                        ? 'Connected'
-                        : (_isConnecting 
-                            ? 'Connecting...'
-                            : 'Disconnected'),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isConnected 
-                          ? Colors.green.shade700
-                          : (_isConnecting 
-                              ? Colors.orange.shade700
-                              : Colors.red.shade700),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        title: const Text('Behavior Space Visualization'),
         backgroundColor: const Color(0xFF667eea),
         foregroundColor: Colors.white,
       ),
-      body: Column(
-        children: [
-          // Connection status banner
-          if (!isConnected && _connectionError.isNotEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12.0),
-              color: Colors.orange.shade100,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.warning_amber, color: Colors.orange.shade700, size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _isConnecting 
-                              ? 'Connecting to server (attempt $_reconnectAttempts)...'
-                              : 'Connection failed',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade900,
-                          ),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            _buildHeader(),
+            if (!isConnected && _connectionError.isNotEmpty)
+              _buildConnectionBanner(),
+            _buildAboutSection(),
+            SizedBox(
+              height: MediaQuery.of(context).size.height - 200,
+              child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth > 1000;
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(16.0),
+                  child: isWide
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: _buildLeftPanel()),
+                            const SizedBox(width: 16),
+                            Expanded(child: _buildRightPanel()),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            _buildLeftPanel(),
+                            const SizedBox(height: 16),
+                            _buildRightPanel(),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _connectionError,
-                    style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
-                  ),
-                  if (!_isConnecting) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Retrying in ${_getReconnectDelay()} seconds...',
-                      style: TextStyle(fontSize: 11, color: Colors.orange.shade700, fontStyle: FontStyle.italic),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  const Text(
-                    '💡 Tip: Your Render backend may be sleeping (free tier spins down after 15 min). First request can take 30-60 seconds to wake up.',
-                    style: TextStyle(fontSize: 11, color: Colors.black54),
-                  ),
-                ],
-              ),
-            ),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildMetricsCard(),
-                    const SizedBox(height: 16),
-                    _buildIScoreHistory(),
-                    const SizedBox(height: 16),
-                    _buildTrajectoryVisualization(),
-                    const SizedBox(height: 16),
-                    _buildExplanation(),
-                  ],
-                ),
-              ),
+                );
+              },
             ),
           ),
           _buildControls(),
-          _buildFooter(),
+        ],
+      ),
+    ));
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      color: const Color.fromARGB(255, 255, 255, 255),
+      padding: const EdgeInsets.symmetric(vertical: 12.0),
+      child: Column(
+        children: [
+          const Text(
+            'Technical Visualization: 64-Dimensional Behavior Space',
+            style: TextStyle(fontSize: 14),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isConnected ? Colors.green.shade700 : Colors.red.shade700,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  isConnected ? 'Connected' : 'Disconnected',
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'Step: $step',
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildMetricsCard() {
+  Widget _buildConnectionBanner() {
     return Container(
-      padding: const EdgeInsets.all(16.0),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12.0),
+      color: Colors.orange.shade100,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_amber, color: Colors.orange.shade700, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _isConnecting 
+                      ? 'Connecting (attempt $_reconnectAttempts)...'
+                      : 'Connection failed',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange.shade900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _connectionError,
+            style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+          ),
+          if (!_isConnecting) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Retrying in ${_getReconnectDelay()} seconds...',
+              style: TextStyle(fontSize: 11, color: Colors.orange.shade700, fontStyle: FontStyle.italic),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAboutSection() {
+    return Container(
+      margin: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.all(20.0),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+        gradient: LinearGradient(
+          colors: [Colors.blue.shade50, Colors.purple.shade50],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: Colors.blue.shade200, width: 2),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Live Metrics',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              Text(
-                'Step: $step',
-                style: const TextStyle(fontSize: 14, color: Colors.white70),
+              Icon(Icons.science, color: Colors.blue.shade700, size: 28),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'About the Interactivity Maximization Agent',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(child: _buildMetricBox('I-Score', iScore, '📊', 'Interactivity score measures how much the agent is learning from its environment')),
-              const SizedBox(width: 8),
-              Expanded(child: _buildMetricBox('Conditional', conditionalComplexity, '🎯', 'Complexity of predicting behavior given history')),
-              const SizedBox(width: 8),
-              Expanded(child: _buildMetricBox('Semi-Cond.', semiconditionalComplexity, '🔮', 'Complexity of predicting without recent history')),
-            ],
+          const Text(
+            'This visualization demonstrates an artificial agent that autonomously maximizes its interactivity score (I-Score) '
+            'through continuous self-prediction and learning. Based on the theoretical framework presented in "The World Is Bigger: '
+            'The Big World Hypothesis," the agent operates in a 64-dimensional behavior space where it:',
+            style: TextStyle(fontSize: 14, height: 1.5),
+          ),
+          const SizedBox(height: 12),
+          _buildBulletPoint('Predicts its own future behavior based on past experiences'),
+          _buildBulletPoint('Measures prediction error as a proxy for environmental complexity'),
+          _buildBulletPoint('Continuously adapts its prediction model to maximize interactivity'),
+          _buildBulletPoint('Demonstrates emergent learning without explicit reward signals'),
+          _buildBulletPoint('PCA trajectory represents the positions of each prediction green is the updated agents prediction yellow is the old agents prediction and ble the the agents actual position'),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue.shade300),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.article, color: Colors.blue.shade700, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      final url = Uri.parse('https://openreview.net/pdf?id=pDR4GXgpcY');
+                      await url_launcher.launchUrl(url, mode: url_launcher.LaunchMode.platformDefault);
+                    },
+                    child: const Text(
+                      'Paper: "The World Is Bigger: The Big World Hypothesis"',
+                      style: TextStyle(
+                        fontSize: 13, 
+                        fontWeight: FontWeight.w600, 
+                        fontStyle: FontStyle.italic,
+                        decoration: TextDecoration.underline,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'The I-Score is computed geometrically as the distance between old predictions (based on limited history) '
+            'and current predictions (with full context). Higher scores indicate the agent is discovering more complex patterns.',
+            style: TextStyle(fontSize: 13, height: 1.5, color: Colors.black87),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildMetricBox(String label, double value, String emoji, String tooltip) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(emoji, style: const TextStyle(fontSize: 20)),
-        const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 10, color: Colors.white70)),
-        const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(8),
+  Widget _buildBulletPoint(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('• ', style: TextStyle(fontSize: 18, color: Colors.blue.shade700, fontWeight: FontWeight.bold)),
+          Expanded(
+            child: Text(text, style: const TextStyle(fontSize: 13, height: 1.4)),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(
-                  value.toStringAsFixed(4),
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
-                  overflow: TextOverflow.ellipsis,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLeftPanel() {
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Behavior Vectors (64-Dimensional)',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Raw behavior space visualization. No abstractions.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            
+            // Behavior vector bars
+            _buildVectorBars(),
+            
+            const SizedBox(height: 24),
+            
+            // 2D trajectory
+            if (pcaReady) ...[
+              const Text(
+                'Trajectory (PCA: 64D → 2D)',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              _buildTrajectoryPlot(),
+            ] else ...[
+              const SizedBox(
+                height: 200,
+                child: Center(
+                  child: Text('Collecting data for PCA projection...',
+                      style: TextStyle(color: Colors.grey)),
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRightPanel() {
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Geometric I-Score Interpretation',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'I-Score = Distance between predictions (geometric complexity)',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            
+            // I-Score card
+            _buildIScoreCard(),
+            
+            const SizedBox(height: 16),
+            
+            // Distance breakdown
+            _buildDistanceBreakdown(),
+            
+            const SizedBox(height: 16),
+            
+            // I-Score history
+            _buildIScoreHistory(),
+            
+            const SizedBox(height: 16),
+            
+            // Explanation
+            _buildExplanation(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVectorBars() {
+    if (behaviorVector.isEmpty) {
+      return const SizedBox(
+        height: 100,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    // Show first 32 dimensions
+    final displayVector = behaviorVector.take(32).toList();
+
+    return SizedBox(
+      height: 100,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: List.generate(displayVector.length, (i) {
+          final value = displayVector[i];
+          final barHeight = (value.abs() * 80).clamp(5.0, 80.0);
+          final color = value > 0 ? Colors.blue : Colors.red;
+
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 0.5),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    height: barHeight,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(2)),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  if (i % 4 == 0)
+                    Text(
+                      '$i',
+                      style: const TextStyle(fontSize: 8, color: Colors.grey),
+                    ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildTrajectoryPlot() {
+    if (trajectory2D.isEmpty) {
+      return const SizedBox(
+        height: 200,
+        child: Center(child: Text('No trajectory data')),
+      );
+    }
+
+    return SizedBox(
+      height: 250,
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: TrajectoryPainter(
+          trajectory: trajectory2D,
+          oldPrediction: oldPrediction2D,
+          currentPrediction: currentPrediction2D,
+          actualPosition: actualPosition2D,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIScoreCard() {
+    String interpretation;
+    if (iScore > 0.05) {
+      interpretation = 'Strong Meta-Learning';
+    } else if (iScore > 0.01) {
+      interpretation = 'Moderate Meta-Learning';
+    } else {
+      interpretation = 'Weak Meta-Learning';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20.0),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+        ),
+      ),
+      child: Column(
+        children: [
+          const Text(
+            'CURRENT I-SCORE',
+            style: TextStyle(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.w600),
           ),
+          const SizedBox(height: 8),
+          Text(
+            iScore.toStringAsFixed(4),
+            style: const TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            interpretation,
+            style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDistanceBreakdown() {
+    return Container(
+      padding: const EdgeInsets.all(12.0),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Distance Analysis',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          _buildDistanceBar(
+            'Old Prediction → Actual',
+            distanceOldToActual,
+            Colors.orange,
+            'How far was prediction from H steps ago',
+          ),
+          const SizedBox(height: 8),
+          _buildDistanceBar(
+            'Current Prediction → Actual',
+            distanceCurrentToActual,
+            Colors.green,
+            'How far is current prediction',
+          ),
+          const SizedBox(height: 8),
+          const Divider(),
+          const SizedBox(height: 8),
+          _buildDistanceBar(
+            'Difference (Geometric I-Score)',
+            distanceDifference,
+            Colors.blue,
+            'How much memory helped',
+            isDifference: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDistanceBar(String label, double value, Color color, String tooltip,
+      {bool isDifference = false}) {
+    final barWidth = ((value.abs() * 50).clamp(0.0, 100.0));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: Container(
+                height: 20,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: FractionallySizedBox(
+                  widthFactor: barWidth / 100.0,
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 60,
+              child: Text(
+                (isDifference ? '+' : '') + value.toStringAsFixed(4),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isDifference ? FontWeight.bold : FontWeight.normal,
+                  color: isDifference ? color : Colors.black87,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 2),
-        Text(tooltip, style: const TextStyle(fontSize: 9, color: Colors.white60, fontStyle: FontStyle.italic)),
+        Text(tooltip, style: const TextStyle(fontSize: 9, color: Colors.grey, fontStyle: FontStyle.italic)),
       ],
     );
   }
@@ -617,49 +911,6 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
     );
   }
 
-  Widget _buildTrajectoryVisualization() {
-    return Container(
-      height: 300,
-      padding: const EdgeInsets.all(12.0),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('2D Behavior Trajectory (PCA)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Expanded(
-            child: !pcaReady
-                ? const Center(child: Text('Building PCA space... (needs 50+ points)', style: TextStyle(color: Colors.grey, fontSize: 11)))
-                : CustomPaint(
-                    size: Size.infinite,
-                    painter: TrajectoryPainter(
-                      trajectory: trajectory2D,
-                      oldPrediction: oldPrediction2D,
-                      currentPrediction: currentPrediction2D,
-                      actualPosition: actualPosition2D,
-                    ),
-                  ),
-          ),
-          const SizedBox(height: 8),
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _LegendItem(color: Colors.blue, label: '● Current position'),
-              SizedBox(width: 12),
-              _LegendItem(color: Colors.orange, label: '× Old prediction'),
-              SizedBox(width: 12),
-              _LegendItem(color: Colors.green, label: '+ Current prediction'),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildExplanation() {
     String explanation;
     if (distanceDifference > 0.01) {
@@ -682,7 +933,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('💡 What This Means', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          const Text('What This Means', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text(explanation, style: const TextStyle(fontSize: 12, height: 1.5)),
         ],
@@ -697,7 +948,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -716,7 +967,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
-              child: const Text('🌅 Wake Up Server'),
+              child: const Text('Wake Server'),
             ),
           ElevatedButton(
             onPressed: handlePause,
@@ -725,7 +976,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
-            child: Text(isPaused ? '▶️ Resume' : '⏸️ Pause'),
+            child: Text(isPaused ? 'Resume' : 'Pause'),
           ),
           ElevatedButton(
             onPressed: handleReset,
@@ -734,7 +985,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
-            child: const Text('🔄 Reset'),
+            child: const Text('Reset'),
           ),
           if (isConnected)
             ElevatedButton(
@@ -744,57 +995,19 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
-              child: const Text('🧊 Freeze Learning'),
+              child: const Text('Freeze Learning'),
             ),
         ],
       ),
     );
   }
 
-  Widget _buildFooter() {
-    return Container(
-      color: const Color(0xFF2c3e50),
-      padding: const EdgeInsets.all(12.0),
-      child: const Text(
-        'Pure Technical Implementation: Behavioral Self-Prediction with Geometric I-Score',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: Colors.white70, fontSize: 11),
-      ),
-    );
-  }
-
   @override
   void dispose() {
-    _shouldReconnect = false;  // Prevent reconnection after dispose
+    _shouldReconnect = false;
     _reconnectTimer?.cancel();
     _cleanupConnection();
     super.dispose();
-  }
-}
-
-class _LegendItem extends StatelessWidget {
-  final Color color;
-  final String label;
-
-  const _LegendItem({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 10)),
-      ],
-    );
   }
 }
 
@@ -832,7 +1045,7 @@ class TrajectoryPainter extends CustomPainter {
     }
 
     final pathPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.5)
+      ..color = Colors.blue.withValues(alpha: 0.5)
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
 
