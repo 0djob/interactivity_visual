@@ -42,6 +42,7 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectDelay = 30; // Max 30 seconds between attempts
+  String _connectionError = '';
 
   double iScore = 0.0;
   double conditionalComplexity = 0.0;
@@ -108,11 +109,17 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
             isConnected = true;
             _isConnecting = false;
             _reconnectAttempts = 0; // Reset on successful connection
+            _connectionError = '';
           });
           print('✅ Connected to behavior space agent');
         }
       }).catchError((error) {
         print('❌ WebSocket ready error: $error');
+        if (mounted) {
+          setState(() {
+            _connectionError = 'Connection failed: ${error.toString()}';
+          });
+        }
         _handleConnectionFailure();
       });
 
@@ -179,16 +186,31 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
         },
         onDone: () {
           print('🔌 WebSocket connection closed');
+          if (mounted) {
+            setState(() {
+              _connectionError = 'Connection closed by server';
+            });
+          }
           _handleConnectionFailure();
         },
         onError: (error) {
           print('❌ WebSocket error: $error');
+          if (mounted) {
+            setState(() {
+              _connectionError = 'WebSocket error: ${error.toString()}';
+            });
+          }
           _handleConnectionFailure();
         },
         cancelOnError: true,
       );
     } catch (e) {
       print('❌ Connection exception: $e');
+      if (mounted) {
+        setState(() {
+          _connectionError = 'Connection exception: ${e.toString()}';
+        });
+      }
       _handleConnectionFailure();
     }
   }
@@ -245,9 +267,49 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
       step = 0;
       isConnected = false;
       _isConnecting = false;
+      _connectionError = '';
     });
     
     Timer(const Duration(milliseconds: 500), connectWebSocket);
+  }
+
+  Future<void> handleWakeServer() async {
+    if (mounted) {
+      setState(() {
+        _connectionError = 'Waking up server... This may take 30-60 seconds on first request.';
+      });
+    }
+
+    try {
+      print('🌅 Attempting to wake server...');
+      final response = await http.get(
+        Uri.parse('https://interactivity-agent.onrender.com/health'),
+      ).timeout(const Duration(seconds: 90));
+      
+      if (response.statusCode == 200) {
+        print('✅ Server is awake!');
+        if (mounted) {
+          setState(() {
+            _connectionError = 'Server is awake! Connecting...';
+            _reconnectAttempts = 0;
+          });
+        }
+        // Give server a moment, then try to connect
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted && !isConnected) {
+          connectWebSocket();
+        }
+      } else {
+        throw Exception('Server returned ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Failed to wake server: $e');
+      if (mounted) {
+        setState(() {
+          _connectionError = 'Failed to wake server: ${e.toString()}. Try again in a moment.';
+        });
+      }
+    }
   }
 
   Future<void> handleFreezeLearning() async {
@@ -374,6 +436,52 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
       ),
       body: Column(
         children: [
+          // Connection status banner
+          if (!isConnected && _connectionError.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12.0),
+              color: Colors.orange.shade100,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.warning_amber, color: Colors.orange.shade700, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _isConnecting 
+                              ? 'Connecting to server (attempt $_reconnectAttempts)...'
+                              : 'Connection failed',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _connectionError,
+                    style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+                  ),
+                  if (!_isConnecting) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Retrying in ${_getReconnectDelay()} seconds...',
+                      style: TextStyle(fontSize: 11, color: Colors.orange.shade700, fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  const Text(
+                    '💡 Tip: Your Render backend may be sleeping (free tier spins down after 15 min). First request can take 30-60 seconds to wake up.',
+                    style: TextStyle(fontSize: 11, color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: SingleChildScrollView(
               child: Padding(
@@ -600,6 +708,16 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
         runSpacing: 8,
         alignment: WrapAlignment.center,
         children: [
+          if (!isConnected)
+            ElevatedButton(
+              onPressed: handleWakeServer,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange.shade600,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
+              child: const Text('🌅 Wake Up Server'),
+            ),
           ElevatedButton(
             onPressed: handlePause,
             style: ElevatedButton.styleFrom(
@@ -618,15 +736,16 @@ class _BehaviorSpaceViewState extends State<BehaviorSpaceView> {
             ),
             child: const Text('🔄 Reset'),
           ),
-          ElevatedButton(
-            onPressed: handleFreezeLearning,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF764ba2),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          if (isConnected)
+            ElevatedButton(
+              onPressed: handleFreezeLearning,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF764ba2),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
+              child: const Text('🧊 Freeze Learning'),
             ),
-            child: const Text('🧊 Freeze Learning'),
-          ),
         ],
       ),
     );
