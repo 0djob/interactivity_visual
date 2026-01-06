@@ -16,7 +16,8 @@ Think of it like this. A chess AI can "solve" chess (or get close) because chess
 
 ## How To Run It
 
-Click on the live link 
+Click on the live link under the actions tab in this GitHub project. It will open a site and automatically reconnect to the backend.
+Note: The steps on the live link version of this project will run much slower, as it is hosted on a free plan, so if you require a faster test, I would advise running it on your own PC
 
 ## How It Works
 
